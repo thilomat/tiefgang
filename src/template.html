@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#120d18">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>TIEFGANG – Die Dungeon-Show</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/*CSS*/
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="cv"></canvas>
+  <div id="pad" class="hide"></div>
+  <div id="hud" class="hide">
+    <div class="hrow">
+      <div class="hp"><img id="icHeart" class="ic" alt=""><div class="bar"><i id="hpFill"></i><span id="hpTxt">30/30</span></div></div>
+      <div id="timer" class="timer"><img id="icGlass" class="ic" alt=""><span id="timeTxt">2:20</span></div>
+      <div class="live"><span class="tag"><i class="dot"></i>LIVE</span><img id="icEye" class="ic eye" alt=""><span id="viewTxt">120</span></div>
+    </div>
+    <div class="hrow">
+      <div class="xp"><span id="lvTxt">LV 1</span><div class="bar thin"><i id="xpFill"></i></div></div>
+      <div id="floorTxt">Etage 1</div>
+      <div class="hgold"><img id="icCoin" class="ic coin" alt=""><span id="goldTxt">0</span></div>
+      <button id="btnPause" aria-label="Pause"><i></i><i></i></button>
+    </div>
+  </div>
+  <div id="bossbar"><b id="bossName"></b><div class="bar"><i id="bossFill"></i></div></div>
+  <canvas id="mini" class="hide"></canvas>
+  <div id="zyn" class="off"><img id="zynFace" alt=""><div class="zt"><b>ZYNIKA</b><p id="zynTxt"></p></div></div>
+  <div id="stick" class="hide"><div id="knob"></div></div>
+  <div id="atk" class="hide"><img id="atkIcon" alt=""></div>
+  <button id="btnPot" class="pbtn hide" aria-label="Heiltrank trinken"><img id="potIcon" alt=""><b id="potCnt">2</b></button>
+  <button id="btnBox" class="pbtn hide" aria-label="Beutekiste öffnen"><img id="boxIcon" alt=""><b id="boxCnt">0</b></button>
+  <div id="hintL" class="hint hide">Daumen hierhin:<br>laufen</div>
+  <div id="hintR" class="hint hide">Hier tippen:<br>angreifen</div>
+  <div id="toasts"></div>
+  <div id="fade"></div>
+  <div id="scr"></div>
+</div>
+<script>
+/*JS*/
+</script>
+</body>
+</html>
