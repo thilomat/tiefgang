@@ -124,7 +124,7 @@ function showTitle() {
         (save ? '<button class="b gold" data-a="cont" data-focus>Weiterspielen · Etage ' + save.floor + '</button>' : '') +
         '<button class="b" data-a="new">' + (save ? 'Neue Show starten' : 'Show starten') + '</button>' +
         '<div class="two"><button class="b alt" data-a="howto" data-v="title">So geht’s</button><button class="b alt" data-a="ach" data-v="title">Erfolge</button></div>' +
-        '<button class="b alt" data-a="sound" data-v="title">Ton: ' + (Sfx.muted ? 'aus' : 'an') + '</button>' +
+        '<div class="two"><button class="b alt" data-a="sound" data-v="title">Ton: ' + (Sfx.muted ? 'aus' : 'an') + '</button><button class="b alt" data-a="music" data-v="title">Musik: ' + (Sfx.music ? 'an' : 'aus') + '</button></div>' +
       '</div>' +
       (META.best ? '<p class="rec">Rekord: Etage ' + META.best + ' · ' + fmt(META.bestViewers) + ' Zuschauer</p>' : '<p class="rec">Fortschritt wird nur in diesem Browser gespeichert.</p>') +
     '</div>', 'vig');
@@ -139,6 +139,7 @@ function showHowto(back) {
       '<li><b>Sponsoren:</b> Ab bestimmten Zuschauerzahlen fallen Pakete vom Himmel. Drüberlaufen öffnet sie.</li>' +
       '<li><b>Erfolge</b> bringen Beutekisten. Öffnen über den Kisten-Knopf oder in der Werbepause.</li>' +
       '<li><b>Jede dritte Etage</b> wartet ein Boss. Die Treppe öffnet erst, wenn er erledigt ist.</li>' +
+      '<li><b>Kein Ton?</b> Einmal ins Spiel tippen und am iPhone die Lautstärke prüfen. Musik und Effekte lassen sich im Menü getrennt abschalten.</li>' +
       '<li><b>Tastatur:</b> WASD oder Pfeile, Leertaste greift an, E trinkt, Q öffnet Kisten, P pausiert.</li>' +
     '</ul><div class="btns"><button class="b" data-a="back" data-v="' + back + '" data-focus>Zurück</button></div></div>');
 }
@@ -159,6 +160,7 @@ function showPause() {
       '<button class="b alt" data-a="ach" data-v="pause">Erfolge</button>' +
       '<button class="b alt" data-a="howto" data-v="pause">So geht’s</button>' +
       '<button class="b alt" data-a="sound" data-v="pause">Ton: ' + (Sfx.muted ? 'aus' : 'an') + '</button>' +
+      '<button class="b alt" data-a="music" data-v="pause">Musik: ' + (Sfx.music ? 'an' : 'aus') + '</button>' +
       '<button class="b alt" data-a="giveup">Aufgeben</button>' +
     '</div></div>');
 }
@@ -269,6 +271,7 @@ const ACT = {
     else showTitle();
   },
   sound(v) { Sfx.toggle(); if (v === 'pause') { G.state = 'play'; showPause(); } else showTitle(); },
+  music(v) { Sfx.toggleMusic(); if (v === 'pause') { G.state = 'play'; showPause(); } else showTitle(); },
   resume() { resumeTo('play'); },
   giveup() { showGiveup(); },
   quit() { gameOver('quit'); },
@@ -395,6 +398,7 @@ function frame(ts) {
     if (G.state === 'title') renderTitle();
     else if (M && P) renderGame(dt);
     if (G.state === 'play' || G.state === 'trans' || G.state === 'over') Zyn.update(dt); else Zyn.hide();
+    Sfx.setMusic(G.state === 'play' || G.state === 'modal' || G.state === 'shop' || G.state === 'trans', G.state === 'play' && G.timeLeft < 30);
     hudUpdate(dt);
     toastUpdate(dt);
     drawMini();

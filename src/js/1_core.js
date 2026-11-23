@@ -57,7 +57,60 @@ let ANIM = 0; // laufende Animationszeit in Sekunden (läuft immer)
 const Sfx = (() => {
   let ac = null, out = null, nbuf = null;
   let muted = !!store.get('tg.mute', false);
+  let musicOn = store.get('tg.music', true) !== false;
+  let mg = null, musWant = false, musFast = false, musNext = 0, musStep = 0, silentEl = null;
   const last = {};
+  // iPhone: Ton auch im Lautlos-Modus (Audio-Sitzung auf "Wiedergabe" stellen)
+  function unlockSilentMode() {
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) { /* egal */ }
+    if (silentEl) return;
+    try {
+      const n = 4000, b = new Uint8Array(44 + n), v = new DataView(b.buffer);
+      const s = (o, t) => { for (let i = 0; i < t.length; i++) b[o + i] = t.charCodeAt(i); };
+      s(0, 'RIFF'); v.setUint32(4, 36 + n, true); s(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+      v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true); s(36, 'data'); v.setUint32(40, n, true);
+      b.fill(128, 44);
+      let bin = ''; for (let i = 0; i < b.length; i++) bin += String.fromCharCode(b[i]);
+      silentEl = new Audio('data:audio/wav;base64,' + btoa(bin));
+      silentEl.loop = true; silentEl.volume = 0.01;
+      silentEl.setAttribute('playsinline', '');
+      const pr = silentEl.play(); if (pr && pr.catch) pr.catch(() => { silentEl = null; });
+    } catch (e) { silentEl = null; }
+  }
+  // Hintergrundmusik: kleiner Chiptune-Loop (Am – F – C – G)
+  const CH = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]];
+  const mf = (m) => 440 * Math.pow(2, (m - 69) / 12);
+  const ARP = [0, 1, 2, 1, 0, 2, 1, 2];
+  const MEL = [12, -1, 7, -1, 10, -1, 7, 5, 3, -1, 5, -1, 7, -1, -1, -1];
+  function mnote(f, t, dur, type, vol) {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type; o.frequency.setValueAtTime(f, t);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(mg); o.start(t); o.stop(t + dur + 0.02);
+  }
+  function mhat(t, vol) {
+    const s = ac.createBufferSource(); s.buffer = nbuf;
+    const f = ac.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 6000;
+    const g = ac.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
+    s.connect(f); f.connect(g); g.connect(mg); s.start(t, Math.random()); s.stop(t + 0.06);
+  }
+  function mstep(t, s) {
+    const bar = (s >> 4) & 3, st = s & 15, ch = CH[bar];
+    if (st % 2 === 0) mnote(mf(ch[0] - 12), t, 0.2, 'triangle', 0.3);
+    if (st % 2 === 0 || musFast) mnote(mf(ch[ARP[(musFast ? st : st >> 1) % 8]] + 12), t, 0.08, 'square', 0.045);
+    if (((s >> 6) & 1) && MEL[st] >= 0) mnote(mf(57 + 12 + MEL[st]), t, 0.22, 'square', 0.035);
+    if (st % 4 === 2) mhat(t, 0.05);
+    if (st % 8 === 0) { mnote(110, t, 0.12, 'sine', 0.35); }
+  }
+  function musicTick() {
+    if (!ac || !mg) return;
+    const on = musWant && musicOn && !muted;
+    mg.gain.setTargetAtTime(on ? 0.55 : 0, ac.currentTime, 0.3);
+    if (!on) { musNext = 0; return; }
+    const sd = 60 / (musFast ? 152 : 116) / 4;
+    if (musNext < ac.currentTime) musNext = ac.currentTime + 0.05;
+    while (musNext < ac.currentTime + 0.25) { try { mstep(musNext, musStep); } catch (e) { /* egal */ } musStep++; musNext += sd; }
+  }
   function init() {
     try {
       if (!ac) {
@@ -71,7 +124,10 @@ const Sfx = (() => {
         nbuf = ac.createBuffer(1, len, ac.sampleRate);
         const d = nbuf.getChannelData(0);
         for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+        mg = ac.createGain(); mg.gain.value = 0; mg.connect(out);
+        setInterval(musicTick, 60);
       }
+      unlockSilentMode();
       if (ac.state === 'suspended') ac.resume().catch(() => {});
     } catch (e) { ac = null; }
   }
@@ -131,6 +187,9 @@ const Sfx = (() => {
       try { S[n](); } catch (e) { /* Ton egal */ }
     },
     get muted() { return muted; },
+    get music() { return musicOn; },
+    setMusic(want, fast) { musWant = want; musFast = fast; },
+    toggleMusic() { musicOn = !musicOn; store.set('tg.music', musicOn); return musicOn; },
     toggle() {
       muted = !muted;
       store.set('tg.mute', muted);
