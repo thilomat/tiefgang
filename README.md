@@ -12,6 +12,7 @@ Ein Pixel-Art-Dungeon-Spiel für den Handy-Browser. Kandidat 4711 wird beim Sonn
 - Zufällig erzeugte Etagen mit Countdown – wer die Treppe nicht rechtzeitig findet, wird verschüttet
 - Zuschauerzahl, Sponsorenpakete am Fallschirm und eine Werbepause mit Shop zwischen den Etagen
 - 23 Erfolge mit Beutekisten, 8 Waffen, 12 Perks und ein Boss auf jeder dritten Etage
+- ZYNIKA spricht ihre Ansagen (Systemstimme oder KI-Stimme über piper-tts-web)
 - Der Spielstand wird im jeweiligen Browser gespeichert
 
 ## Technik

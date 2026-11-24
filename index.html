@@ -134,6 +134,7 @@ button{font:inherit;color:inherit;-webkit-appearance:none;appearance:none;border
 .zq.small img{width:48px}
 .menu{width:100%;display:grid;gap:10px}
 .two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+.vnote{margin:-2px 0 0;font-size:13px;color:var(--mute);text-align:center}
 .rec{margin:0;color:var(--mute);font-size:14px}
 .how{margin:12px 0 0;padding:0;list-style:none;display:grid;gap:9px;font-size:15px;line-height:1.3}
 .how li{position:relative;padding-left:14px}
@@ -421,6 +422,109 @@ const Sfx = (() => {
       if (out) out.gain.value = muted ? 0 : 0.5;
       return muted;
     },
+  };
+})();
+
+// ---------- Sprachausgabe für ZYNIKA ----------
+// "system": eingebaute Browser-Stimme (Web Speech API) · "ki": Piper-Stimme (piper-tts-web, lädt einmalig ein Stimmmodell) · "off"
+const Voice = (() => {
+  const PIPER_URL = 'https://cdn.jsdelivr.net/npm/@mintplex-labs/piper-tts-web@1.0.5/+esm';
+  const VOICE_ID = 'de_DE-kerstin-low';
+  const hasSys = 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window;
+  let mode = store.get('tg.voice', 'system');
+  let sysVoice = null, unlocked = false, piper = null, audioEl = null, speakingUntil = 0, token = 0;
+  const cache = new Map();
+  const st = { piper: 'idle', progress: 0, error: '' };
+  function pickVoice() {
+    try {
+      const de = speechSynthesis.getVoices().filter((v) => /^de/i.test(v.lang));
+      sysVoice = de.find((v) => /anna|helena|petra|marlene|vicki|katja|female|weiblich/i.test(v.name)) || de[0] || null;
+    } catch (e) { sysVoice = null; }
+  }
+  if (hasSys) { pickVoice(); try { speechSynthesis.addEventListener('voiceschanged', pickVoice); } catch (e) { /* alt */ } }
+  function clean(t) {
+    return String(t).replace(/[„“”"»«]/g, '').replace(/…/g, '...').replace(/ – /g, ', ').replace(/×/g, ' mal ')
+      .replace(/Kandidat 4711/g, 'Kandidat siebenundvierzig elf').replace(/4711/g, 'siebenundvierzig elf').replace(/ZYNIKA/g, 'Zünika')
+      .replace(/(\d)\.(\d{3})/g, '$1$2');
+  }
+  function stop() {
+    token++;
+    speakingUntil = 0;
+    try { if (hasSys) speechSynthesis.cancel(); } catch (e) { /* egal */ }
+    if (audioEl) { try { audioEl.pause(); } catch (e) { /* egal */ } }
+  }
+  async function loadPiper(onProg) {
+    if (st.piper === 'ready' || st.piper === 'loading') return;
+    st.piper = 'loading'; st.progress = 0; st.error = '';
+    try {
+      piper = await import(PIPER_URL);
+      await piper.download(VOICE_ID, (p) => {
+        if (p && p.total) st.progress = Math.round((p.loaded / p.total) * 100);
+        if (onProg) onProg();
+      });
+      st.piper = 'ready';
+    } catch (e) {
+      st.piper = 'error';
+      st.error = location.hostname.endsWith('claude.ai') || location.hostname.includes('claudeusercontent')
+        ? 'In der Claude-Vorschau blockiert – klappt auf der GitHub-Seite.'
+        : 'Laden fehlgeschlagen. Die Systemstimme springt ein.';
+      console.warn('Piper:', e);
+    }
+    if (onProg) onProg();
+  }
+  function speakSys(t) {
+    if (!hasSys) return;
+    const u = new SpeechSynthesisUtterance(t);
+    u.lang = 'de-DE'; if (sysVoice) u.voice = sysVoice;
+    u.rate = 1.08; u.pitch = 1.3; u.volume = 1;
+    const my = token;
+    u.onend = u.onerror = () => { if (my === token) speakingUntil = 0; };
+    speakingUntil = performance.now() + 2000 + t.length * 95;
+    speechSynthesis.speak(u);
+  }
+  async function speakPiper(t) {
+    const my = token;
+    speakingUntil = performance.now() + 3000 + t.length * 95;
+    try {
+      let url = cache.get(t);
+      if (!url) {
+        const wav = await piper.predict({ text: t, voiceId: VOICE_ID });
+        url = URL.createObjectURL(wav);
+        cache.set(t, url);
+      }
+      if (my !== token) return;
+      if (!audioEl) audioEl = new Audio();
+      audioEl.src = url; audioEl.playbackRate = 1.05;
+      audioEl.onended = () => { if (my === token) speakingUntil = 0; };
+      await audioEl.play();
+    } catch (e) { if (my === token) speakSys(t); }
+  }
+  return {
+    st,
+    get mode() { return mode; },
+    get label() { return mode === 'off' ? 'aus' : mode === 'ki' ? 'KI-Stimme' : 'Systemstimme'; },
+    get speaking() { return speakingUntil > performance.now(); },
+    unlock() {
+      if (!unlocked && hasSys) {
+        unlocked = true;
+        try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); } catch (e) { /* egal */ }
+      }
+      if (mode === 'ki' && st.piper === 'idle') loadPiper();
+    },
+    cycle(onProg) {
+      mode = mode === 'system' ? 'ki' : mode === 'ki' ? 'off' : 'system';
+      store.set('tg.voice', mode);
+      stop();
+      if (mode === 'ki') loadPiper(onProg);
+      return mode;
+    },
+    say(text) {
+      if (mode === 'off' || Sfx.muted || !text) return;
+      stop();
+      const t = clean(text);
+      if (mode === 'ki' && st.piper === 'ready') speakPiper(t); else speakSys(t);
+    },
+    stop,
   };
 })();
 
@@ -2783,18 +2887,19 @@ const Zyn = {
       if (this.cur || this.q.length || ANIM - this.lastAmb < 9) return;
       this.lastAmb = ANIM;
     }
-    if (prio >= 2) { this.q.unshift(text); this.cur = null; }
+    if (prio >= 2) { this.q.unshift(text); this.cur = null; Voice.stop(); }
     else this.q.push(text);
     if (this.q.length > 3) this.q.length = 3;
   },
   setFace(f) { if (this.faceState !== f) { this.faceState = f; this.face.src = sprURL(f); } },
   hide() { this.el.classList.add('off'); },
-  clear() { this.q = []; this.cur = null; this.hide(); },
+  clear() { this.q = []; this.cur = null; this.hide(); Voice.stop(); },
   update(dt) {
     if (!this.cur) {
       if (!this.q.length) { this.hide(); return; }
-      this.cur = this.q.shift(); this.shown = 0; this.hold = 1.5 + this.cur.length * 0.03;
+      this.cur = this.q.shift(); this.shown = 0; this.hold = 1.5 + this.cur.length * 0.03; this.maxHold = 14;
       this.txt.textContent = '';
+      Voice.say(this.cur);
     }
     this.el.classList.remove('off');
     if (this.shown < this.cur.length) {
@@ -2804,8 +2909,8 @@ const Zyn = {
       this.setFace(((this.talk * 9) | 0) % 2 ? 'zyn_b' : 'zyn_a');
     } else {
       this.setFace('zyn_a');
-      this.hold -= dt;
-      if (this.hold <= 0) this.cur = null;
+      this.hold -= dt; this.maxHold -= dt;
+      if ((this.hold <= 0 && !Voice.speaking) || this.maxHold <= 0) this.cur = null;
     }
   },
 };
@@ -2900,10 +3005,19 @@ function showTitle() {
         '<button class="b" data-a="new">' + (save ? 'Neue Show starten' : 'Show starten') + '</button>' +
         '<div class="two"><button class="b alt" data-a="howto" data-v="title">So geht’s</button><button class="b alt" data-a="ach" data-v="title">Erfolge</button></div>' +
         '<div class="two"><button class="b alt" data-a="sound" data-v="title">Ton: ' + (Sfx.muted ? 'aus' : 'an') + '</button><button class="b alt" data-a="music" data-v="title">Musik: ' + (Sfx.music ? 'an' : 'aus') + '</button></div>' +
+        '<button class="b alt" data-a="voice" data-v="title">Stimme: ' + Voice.label + '</button>' + voiceNote() +
       '</div>' +
       (META.best ? '<p class="rec">Rekord: Etage ' + META.best + ' · ' + fmt(META.bestViewers) + ' Zuschauer</p>' : '<p class="rec">Fortschritt wird nur in diesem Browser gespeichert.</p>') +
     '</div>', 'vig');
 }
+function voiceNote() {
+  if (Voice.mode !== 'ki') return '';
+  const s = Voice.st;
+  const t = s.piper === 'loading' ? 'KI-Stimme wird geladen … ' + s.progress + ' % (einmalig, besser im WLAN)'
+    : s.piper === 'ready' ? 'KI-Stimme bereit.' : s.piper === 'error' ? s.error : 'Lädt beim nächsten Antippen.';
+  return '<p class="vnote" id="vnote">' + esc(t) + '</p>';
+}
+function refreshVoiceNote() { const n = document.getElementById('vnote'); if (n) n.outerHTML = voiceNote(); }
 function showHowto(back) {
   UI.set(
     '<div class="panel"><h2>So geht’s</h2><ul class="how">' +
@@ -2914,6 +3028,7 @@ function showHowto(back) {
       '<li><b>Sponsoren:</b> Ab bestimmten Zuschauerzahlen fallen Pakete vom Himmel. Drüberlaufen öffnet sie.</li>' +
       '<li><b>Erfolge</b> bringen Beutekisten. Öffnen über den Kisten-Knopf oder in der Werbepause.</li>' +
       '<li><b>Jede dritte Etage</b> wartet ein Boss. Die Treppe öffnet erst, wenn er erledigt ist.</li>' +
+      '<li><b>Stimme:</b> ZYNIKA spricht ihre Ansagen. Im Menü wählst du zwischen Systemstimme, KI-Stimme (einmaliger Download, nur auf der GitHub-Seite) und aus.</li>' +
       '<li><b>Kein Ton?</b> Einmal ins Spiel tippen und am iPhone die Lautstärke prüfen. Musik und Effekte lassen sich im Menü getrennt abschalten.</li>' +
       '<li><b>Tastatur:</b> WASD oder Pfeile, Leertaste greift an, E trinkt, Q öffnet Kisten, P pausiert.</li>' +
     '</ul><div class="btns"><button class="b" data-a="back" data-v="' + back + '" data-focus>Zurück</button></div></div>');
@@ -2936,6 +3051,7 @@ function showPause() {
       '<button class="b alt" data-a="howto" data-v="pause">So geht’s</button>' +
       '<button class="b alt" data-a="sound" data-v="pause">Ton: ' + (Sfx.muted ? 'aus' : 'an') + '</button>' +
       '<button class="b alt" data-a="music" data-v="pause">Musik: ' + (Sfx.music ? 'an' : 'aus') + '</button>' +
+      '<button class="b alt" data-a="voice" data-v="pause">Stimme: ' + Voice.label + '</button>' + voiceNote() +
       '<button class="b alt" data-a="giveup">Aufgeben</button>' +
     '</div></div>');
 }
@@ -2991,6 +3107,7 @@ function openBox() {
   if (G.run.boxes >= 10) unlock('kisten');
   Sfx.play('box');
   const line = weapon ? fill(LINES.weapon, { w: weapon }) : rew.some((r) => r.junk) ? LINES.junk : LINES.boxOpen[t];
+  Voice.say(line);
   UI.set(
     '<div class="panel center"><h2>' + TIER[t] + '-Kiste</h2>' +
       '<div class="boxbig open">' + img(BOXI[t], 96, 8) + '</div>' +
@@ -3027,6 +3144,7 @@ function showGameOver() {
   const o = G.over;
   if (!o) return;
   UI.hud(false);
+  Voice.say(o.line);
   UI.set(
     '<div class="panel"><h2 class="pink">' + (o.reason === 'collapse' ? 'Eingestürzt!' : o.reason === 'quit' ? 'Aufgegeben' : 'Ausgeschieden!') + '</h2>' +
       '<div class="zq">' + img('zyn_a', 48) + '<p>' + esc(o.line) + '</p></div>' +
@@ -3047,6 +3165,11 @@ const ACT = {
   },
   sound(v) { Sfx.toggle(); if (v === 'pause') { G.state = 'play'; showPause(); } else showTitle(); },
   music(v) { Sfx.toggleMusic(); if (v === 'pause') { G.state = 'play'; showPause(); } else showTitle(); },
+  voice(v) {
+    Voice.cycle(refreshVoiceNote);
+    if (v === 'pause') { G.state = 'play'; showPause(); } else showTitle();
+    if (Voice.mode !== 'off') setTimeout(() => Voice.say(Voice.mode === 'ki' && Voice.st.piper !== 'ready' ? 'Moment, ich mache mich hübsch. Bis dahin klinge ich so.' : 'Testansage. Hier spricht ZYNIKA.'), 300);
+  },
   resume() { resumeTo('play'); },
   giveup() { showGiveup(); },
   quit() { gameOver('quit'); },
@@ -3093,7 +3216,7 @@ function setupInput() {
   pad.addEventListener('pointerdown', (e) => {
     if (G.state !== 'play') return;
     e.preventDefault();
-    Sfx.init();
+    Sfx.init(); Voice.unlock();
     if (e.clientX < window.innerWidth * 0.5) {
       if (joy.id !== null) return;
       joy.id = e.pointerId; joy.ox = e.clientX; joy.oy = e.clientY;
@@ -3151,7 +3274,7 @@ function setupInput() {
     const b = e.target.closest('[data-a]');
     if (!b || b.disabled) return;
     if (performance.now() - UI.openedAt < 280) return;
-    Sfx.init(); Sfx.play('click');
+    Sfx.init(); Voice.unlock(); Sfx.play('click');
     const f = ACT[b.dataset.a];
     if (f) f(b.dataset.v);
   });

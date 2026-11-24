@@ -8,18 +8,19 @@ const Zyn = {
       if (this.cur || this.q.length || ANIM - this.lastAmb < 9) return;
       this.lastAmb = ANIM;
     }
-    if (prio >= 2) { this.q.unshift(text); this.cur = null; }
+    if (prio >= 2) { this.q.unshift(text); this.cur = null; Voice.stop(); }
     else this.q.push(text);
     if (this.q.length > 3) this.q.length = 3;
   },
   setFace(f) { if (this.faceState !== f) { this.faceState = f; this.face.src = sprURL(f); } },
   hide() { this.el.classList.add('off'); },
-  clear() { this.q = []; this.cur = null; this.hide(); },
+  clear() { this.q = []; this.cur = null; this.hide(); Voice.stop(); },
   update(dt) {
     if (!this.cur) {
       if (!this.q.length) { this.hide(); return; }
-      this.cur = this.q.shift(); this.shown = 0; this.hold = 1.5 + this.cur.length * 0.03;
+      this.cur = this.q.shift(); this.shown = 0; this.hold = 1.5 + this.cur.length * 0.03; this.maxHold = 14;
       this.txt.textContent = '';
+      Voice.say(this.cur);
     }
     this.el.classList.remove('off');
     if (this.shown < this.cur.length) {
@@ -29,8 +30,8 @@ const Zyn = {
       this.setFace(((this.talk * 9) | 0) % 2 ? 'zyn_b' : 'zyn_a');
     } else {
       this.setFace('zyn_a');
-      this.hold -= dt;
-      if (this.hold <= 0) this.cur = null;
+      this.hold -= dt; this.maxHold -= dt;
+      if ((this.hold <= 0 && !Voice.speaking) || this.maxHold <= 0) this.cur = null;
     }
   },
 };
@@ -125,10 +126,19 @@ function showTitle() {
         '<button class="b" data-a="new">' + (save ? 'Neue Show starten' : 'Show starten') + '</button>' +
         '<div class="two"><button class="b alt" data-a="howto" data-v="title">So geht’s</button><button class="b alt" data-a="ach" data-v="title">Erfolge</button></div>' +
         '<div class="two"><button class="b alt" data-a="sound" data-v="title">Ton: ' + (Sfx.muted ? 'aus' : 'an') + '</button><button class="b alt" data-a="music" data-v="title">Musik: ' + (Sfx.music ? 'an' : 'aus') + '</button></div>' +
+        '<button class="b alt" data-a="voice" data-v="title">Stimme: ' + Voice.label + '</button>' + voiceNote() +
       '</div>' +
       (META.best ? '<p class="rec">Rekord: Etage ' + META.best + ' · ' + fmt(META.bestViewers) + ' Zuschauer</p>' : '<p class="rec">Fortschritt wird nur in diesem Browser gespeichert.</p>') +
     '</div>', 'vig');
 }
+function voiceNote() {
+  if (Voice.mode !== 'ki') return '';
+  const s = Voice.st;
+  const t = s.piper === 'loading' ? 'KI-Stimme wird geladen … ' + s.progress + ' % (einmalig, besser im WLAN)'
+    : s.piper === 'ready' ? 'KI-Stimme bereit.' : s.piper === 'error' ? s.error : 'Lädt beim nächsten Antippen.';
+  return '<p class="vnote" id="vnote">' + esc(t) + '</p>';
+}
+function refreshVoiceNote() { const n = document.getElementById('vnote'); if (n) n.outerHTML = voiceNote(); }
 function showHowto(back) {
   UI.set(
     '<div class="panel"><h2>So geht’s</h2><ul class="how">' +
@@ -139,6 +149,7 @@ function showHowto(back) {
       '<li><b>Sponsoren:</b> Ab bestimmten Zuschauerzahlen fallen Pakete vom Himmel. Drüberlaufen öffnet sie.</li>' +
       '<li><b>Erfolge</b> bringen Beutekisten. Öffnen über den Kisten-Knopf oder in der Werbepause.</li>' +
       '<li><b>Jede dritte Etage</b> wartet ein Boss. Die Treppe öffnet erst, wenn er erledigt ist.</li>' +
+      '<li><b>Stimme:</b> ZYNIKA spricht ihre Ansagen. Im Menü wählst du zwischen Systemstimme, KI-Stimme (einmaliger Download, nur auf der GitHub-Seite) und aus.</li>' +
       '<li><b>Kein Ton?</b> Einmal ins Spiel tippen und am iPhone die Lautstärke prüfen. Musik und Effekte lassen sich im Menü getrennt abschalten.</li>' +
       '<li><b>Tastatur:</b> WASD oder Pfeile, Leertaste greift an, E trinkt, Q öffnet Kisten, P pausiert.</li>' +
     '</ul><div class="btns"><button class="b" data-a="back" data-v="' + back + '" data-focus>Zurück</button></div></div>');
@@ -161,6 +172,7 @@ function showPause() {
       '<button class="b alt" data-a="howto" data-v="pause">So geht’s</button>' +
       '<button class="b alt" data-a="sound" data-v="pause">Ton: ' + (Sfx.muted ? 'aus' : 'an') + '</button>' +
       '<button class="b alt" data-a="music" data-v="pause">Musik: ' + (Sfx.music ? 'an' : 'aus') + '</button>' +
+      '<button class="b alt" data-a="voice" data-v="pause">Stimme: ' + Voice.label + '</button>' + voiceNote() +
       '<button class="b alt" data-a="giveup">Aufgeben</button>' +
     '</div></div>');
 }
@@ -216,6 +228,7 @@ function openBox() {
   if (G.run.boxes >= 10) unlock('kisten');
   Sfx.play('box');
   const line = weapon ? fill(LINES.weapon, { w: weapon }) : rew.some((r) => r.junk) ? LINES.junk : LINES.boxOpen[t];
+  Voice.say(line);
   UI.set(
     '<div class="panel center"><h2>' + TIER[t] + '-Kiste</h2>' +
       '<div class="boxbig open">' + img(BOXI[t], 96, 8) + '</div>' +
@@ -252,6 +265,7 @@ function showGameOver() {
   const o = G.over;
   if (!o) return;
   UI.hud(false);
+  Voice.say(o.line);
   UI.set(
     '<div class="panel"><h2 class="pink">' + (o.reason === 'collapse' ? 'Eingestürzt!' : o.reason === 'quit' ? 'Aufgegeben' : 'Ausgeschieden!') + '</h2>' +
       '<div class="zq">' + img('zyn_a', 48) + '<p>' + esc(o.line) + '</p></div>' +
@@ -272,6 +286,11 @@ const ACT = {
   },
   sound(v) { Sfx.toggle(); if (v === 'pause') { G.state = 'play'; showPause(); } else showTitle(); },
   music(v) { Sfx.toggleMusic(); if (v === 'pause') { G.state = 'play'; showPause(); } else showTitle(); },
+  voice(v) {
+    Voice.cycle(refreshVoiceNote);
+    if (v === 'pause') { G.state = 'play'; showPause(); } else showTitle();
+    if (Voice.mode !== 'off') setTimeout(() => Voice.say(Voice.mode === 'ki' && Voice.st.piper !== 'ready' ? 'Moment, ich mache mich hübsch. Bis dahin klinge ich so.' : 'Testansage. Hier spricht ZYNIKA.'), 300);
+  },
   resume() { resumeTo('play'); },
   giveup() { showGiveup(); },
   quit() { gameOver('quit'); },
@@ -318,7 +337,7 @@ function setupInput() {
   pad.addEventListener('pointerdown', (e) => {
     if (G.state !== 'play') return;
     e.preventDefault();
-    Sfx.init();
+    Sfx.init(); Voice.unlock();
     if (e.clientX < window.innerWidth * 0.5) {
       if (joy.id !== null) return;
       joy.id = e.pointerId; joy.ox = e.clientX; joy.oy = e.clientY;
@@ -376,7 +395,7 @@ function setupInput() {
     const b = e.target.closest('[data-a]');
     if (!b || b.disabled) return;
     if (performance.now() - UI.openedAt < 280) return;
-    Sfx.init(); Sfx.play('click');
+    Sfx.init(); Voice.unlock(); Sfx.play('click');
     const f = ACT[b.dataset.a];
     if (f) f(b.dataset.v);
   });

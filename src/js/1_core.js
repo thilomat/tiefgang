@@ -198,3 +198,106 @@ const Sfx = (() => {
     },
   };
 })();
+
+// ---------- Sprachausgabe für ZYNIKA ----------
+// "system": eingebaute Browser-Stimme (Web Speech API) · "ki": Piper-Stimme (piper-tts-web, lädt einmalig ein Stimmmodell) · "off"
+const Voice = (() => {
+  const PIPER_URL = 'https://cdn.jsdelivr.net/npm/@mintplex-labs/piper-tts-web@1.0.5/+esm';
+  const VOICE_ID = 'de_DE-kerstin-low';
+  const hasSys = 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window;
+  let mode = store.get('tg.voice', 'system');
+  let sysVoice = null, unlocked = false, piper = null, audioEl = null, speakingUntil = 0, token = 0;
+  const cache = new Map();
+  const st = { piper: 'idle', progress: 0, error: '' };
+  function pickVoice() {
+    try {
+      const de = speechSynthesis.getVoices().filter((v) => /^de/i.test(v.lang));
+      sysVoice = de.find((v) => /anna|helena|petra|marlene|vicki|katja|female|weiblich/i.test(v.name)) || de[0] || null;
+    } catch (e) { sysVoice = null; }
+  }
+  if (hasSys) { pickVoice(); try { speechSynthesis.addEventListener('voiceschanged', pickVoice); } catch (e) { /* alt */ } }
+  function clean(t) {
+    return String(t).replace(/[„“”"»«]/g, '').replace(/…/g, '...').replace(/ – /g, ', ').replace(/×/g, ' mal ')
+      .replace(/Kandidat 4711/g, 'Kandidat siebenundvierzig elf').replace(/4711/g, 'siebenundvierzig elf').replace(/ZYNIKA/g, 'Zünika')
+      .replace(/(\d)\.(\d{3})/g, '$1$2');
+  }
+  function stop() {
+    token++;
+    speakingUntil = 0;
+    try { if (hasSys) speechSynthesis.cancel(); } catch (e) { /* egal */ }
+    if (audioEl) { try { audioEl.pause(); } catch (e) { /* egal */ } }
+  }
+  async function loadPiper(onProg) {
+    if (st.piper === 'ready' || st.piper === 'loading') return;
+    st.piper = 'loading'; st.progress = 0; st.error = '';
+    try {
+      piper = await import(PIPER_URL);
+      await piper.download(VOICE_ID, (p) => {
+        if (p && p.total) st.progress = Math.round((p.loaded / p.total) * 100);
+        if (onProg) onProg();
+      });
+      st.piper = 'ready';
+    } catch (e) {
+      st.piper = 'error';
+      st.error = location.hostname.endsWith('claude.ai') || location.hostname.includes('claudeusercontent')
+        ? 'In der Claude-Vorschau blockiert – klappt auf der GitHub-Seite.'
+        : 'Laden fehlgeschlagen. Die Systemstimme springt ein.';
+      console.warn('Piper:', e);
+    }
+    if (onProg) onProg();
+  }
+  function speakSys(t) {
+    if (!hasSys) return;
+    const u = new SpeechSynthesisUtterance(t);
+    u.lang = 'de-DE'; if (sysVoice) u.voice = sysVoice;
+    u.rate = 1.08; u.pitch = 1.3; u.volume = 1;
+    const my = token;
+    u.onend = u.onerror = () => { if (my === token) speakingUntil = 0; };
+    speakingUntil = performance.now() + 2000 + t.length * 95;
+    speechSynthesis.speak(u);
+  }
+  async function speakPiper(t) {
+    const my = token;
+    speakingUntil = performance.now() + 3000 + t.length * 95;
+    try {
+      let url = cache.get(t);
+      if (!url) {
+        const wav = await piper.predict({ text: t, voiceId: VOICE_ID });
+        url = URL.createObjectURL(wav);
+        cache.set(t, url);
+      }
+      if (my !== token) return;
+      if (!audioEl) audioEl = new Audio();
+      audioEl.src = url; audioEl.playbackRate = 1.05;
+      audioEl.onended = () => { if (my === token) speakingUntil = 0; };
+      await audioEl.play();
+    } catch (e) { if (my === token) speakSys(t); }
+  }
+  return {
+    st,
+    get mode() { return mode; },
+    get label() { return mode === 'off' ? 'aus' : mode === 'ki' ? 'KI-Stimme' : 'Systemstimme'; },
+    get speaking() { return speakingUntil > performance.now(); },
+    unlock() {
+      if (!unlocked && hasSys) {
+        unlocked = true;
+        try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); } catch (e) { /* egal */ }
+      }
+      if (mode === 'ki' && st.piper === 'idle') loadPiper();
+    },
+    cycle(onProg) {
+      mode = mode === 'system' ? 'ki' : mode === 'ki' ? 'off' : 'system';
+      store.set('tg.voice', mode);
+      stop();
+      if (mode === 'ki') loadPiper(onProg);
+      return mode;
+    },
+    say(text) {
+      if (mode === 'off' || Sfx.muted || !text) return;
+      stop();
+      const t = clean(text);
+      if (mode === 'ki' && st.piper === 'ready') speakPiper(t); else speakSys(t);
+    },
+    stop,
+  };
+})();
